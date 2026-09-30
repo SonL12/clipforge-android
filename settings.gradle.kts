@@ -4,5 +4,5 @@ pluginManagement {
 dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
-rootProject.name = "AIToolkit"
+rootProject.name = "ClipForge"
 include(":app")

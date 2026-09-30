@@ -1,4 +1,4 @@
-name: Build APK
+name: ClipForge Build
 on:
   push:
   workflow_dispatch:
@@ -18,5 +18,5 @@ jobs:
       - run: gradle assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: aitoolkit-debug
+          name: clipforge-debug
           path: app/build/outputs/apk/debug/*.apk

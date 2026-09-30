@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.aitoolkit.app"
+    namespace = "com.clipforge.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.aitoolkit.app"
+        applicationId = "com.clipforge.app"
         minSdk = 24
         targetSdk = 34
         versionCode = 1

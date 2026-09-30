@@ -1,4 +1,4 @@
-package com.aitoolkit.app
+package com.clipforge.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -11,7 +11,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Text("AI Toolkit v0.1")
+                Text("ClipForge v0.1")
             }
         }
     }
