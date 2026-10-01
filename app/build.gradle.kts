@@ -11,8 +11,10 @@ android {
         applicationId = "com.clipforge.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2"
+
+        ndk { abiFilters += "arm64-v8a" }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -28,4 +30,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.0")
+
+    // FFmpeg (fork komunitas, LGPL). Versi di-pin persis, jangan pakai + atau latest
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.7")
 }
