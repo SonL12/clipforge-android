@@ -110,6 +110,7 @@ fun ConverterScreen() {
     ) {
         Text("ClipForge", style = MaterialTheme.typography.headlineMedium)
         Text("Converter", style = MaterialTheme.typography.titleMedium)
+        ServerSettings()
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
