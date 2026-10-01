@@ -9,11 +9,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Cek isi folder app
-        run: |
-          git log -1 --oneline
-          ls -la app/
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
