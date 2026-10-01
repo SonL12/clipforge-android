@@ -8,10 +8,20 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+
+      - name: Cek isi folder app
+        run: |
+          git log -1 --oneline
+          ls -la app/
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
+
+      - name: Pulihkan keystore dari secret
+        run: echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > app/debug.keystore
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
