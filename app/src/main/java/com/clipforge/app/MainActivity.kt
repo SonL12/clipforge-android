@@ -17,6 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 data class PickedFile(val uri: Uri, val name: String) {
     val ext: String get() = name.substringAfterLast('.', "").lowercase()
@@ -28,6 +31,12 @@ private fun queryName(context: Context, uri: Uri): String {
         if (i >= 0 && c.moveToFirst()) return c.getString(i)
     }
     return uri.lastPathSegment ?: "file"
+}
+
+// jpg dan jpeg dianggap sama
+private fun samaFormat(a: String, b: String): Boolean {
+    fun n(x: String) = if (x == "jpeg") "jpg" else x
+    return n(a) == n(b)
 }
 
 class MainActivity : ComponentActivity() {
@@ -46,6 +55,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ConverterScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var files by remember { mutableStateOf(emptyList<PickedFile>()) }
     var categories by remember { mutableStateOf(emptyList<MediaType>()) }
@@ -53,6 +63,9 @@ fun ConverterScreen() {
     var format by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
+    var running by remember { mutableStateOf(false) }
+    var convertJob by remember { mutableStateOf<Job?>(null) }
+    val log = remember { mutableStateListOf<String>() }
 
     fun resetPilihan() {
         categories = emptyList()
@@ -69,6 +82,7 @@ fun ConverterScreen() {
     // Satu pintu untuk semua perubahan daftar file (pilih, hapus satu, hapus semua)
     fun terapkan(picked: List<PickedFile>) {
         files = picked
+        log.clear()
         if (picked.isEmpty()) {
             resetPilihan()
             message = ""
@@ -93,6 +107,50 @@ fun ConverterScreen() {
         }
     }
 
+    fun mulaiConvert() {
+        val tujuan = format ?: return
+        if (Prefs.serverUrl(context).isBlank() || Prefs.apiKey(context).isBlank()) {
+            message = "⚠️ Isi URL server dan API key dulu di bagian Server."
+            return
+        }
+        val daftar = files
+        log.clear()
+        daftar.forEach { log.add("⏸️ ${it.name}: antre") }
+
+        convertJob = scope.launch {
+            running = true
+            try {
+                daftar.forEachIndexed { i, f ->
+                    if (samaFormat(f.ext, tujuan)) {
+                        log[i] = "⏭️ ${f.name}: sudah berformat .$tujuan, dilewati"
+                        return@forEachIndexed
+                    }
+                    try {
+                        val lokasi = convertFile(context, f, tujuan) { log[i] = it }
+                        log[i] = "✅ ${f.name} → $lokasi"
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        log[i] = "❌ ${f.name}: ${e.message ?: e.javaClass.simpleName}"
+                    }
+                }
+            } catch (e: CancellationException) {
+                for (i in log.indices) {
+                    val t = log[i]
+                    log[i] = when {
+                        t.startsWith("✅") || t.startsWith("❌") || t.startsWith("⏭️") -> t
+                        t.startsWith("⏸️") -> "⏹️ ${daftar[i].name}: dilewati"
+                        else -> "🛑 ${daftar[i].name}: dibatalkan"
+                    }
+                }
+                throw e
+            } finally {
+                running = false
+                convertJob = null
+            }
+        }
+    }
+
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
@@ -110,33 +168,38 @@ fun ConverterScreen() {
     ) {
         Text("ClipForge", style = MaterialTheme.typography.headlineMedium)
         Text("Converter", style = MaterialTheme.typography.titleMedium)
+
         ServerSettings()
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
-                picker.launch(arrayOf("video/*", "audio/*", "image/*"))
-            }) { Text("Pilih file") }
+            Button(
+                enabled = !running,
+                onClick = { picker.launch(arrayOf("video/*", "audio/*", "image/*")) }
+            ) { Text("Pilih file") }
 
             if (files.isNotEmpty()) {
-                OutlinedButton(onClick = { terapkan(emptyList()) }) {
-                    Text("Batal / hapus semua")
-                }
+                OutlinedButton(
+                    enabled = !running,
+                    onClick = { terapkan(emptyList()) }
+                ) { Text("Batal / hapus semua") }
             }
         }
 
         if (message.isNotEmpty()) Text(message)
 
-        files.forEach { f ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    "• ${f.name}",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = { terapkan(files - f) }) { Text("✕") }
+        if (log.isEmpty()) {
+            files.forEach { f ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "• ${f.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { terapkan(files - f) }) { Text("✕") }
+                }
             }
         }
 
@@ -149,6 +212,7 @@ fun ConverterScreen() {
                 ) {
                     RadioButton(
                         selected = category == cat,
+                        enabled = !running,
                         onClick = { pilihKategori(cat, files) }
                     )
                     Text(cat.label)
@@ -160,7 +224,7 @@ fun ConverterScreen() {
                 val formats = Formats.targetFormats(cat, files.map { it.ext }.toSet())
                 Text("Format tujuan", style = MaterialTheme.typography.labelLarge)
                 Box {
-                    OutlinedButton(onClick = { expanded = true }) {
+                    OutlinedButton(enabled = !running, onClick = { expanded = true }) {
                         Text(format ?: "Pilih format")
                     }
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -174,9 +238,21 @@ fun ConverterScreen() {
                 }
             }
 
-            Button(onClick = { }, enabled = false) {
-                Text("Convert (segera hadir)")
+            if (!running) {
+                Button(
+                    enabled = format != null,
+                    onClick = { mulaiConvert() }
+                ) { Text("Convert") }
+            } else {
+                Button(
+                    onClick = { convertJob?.cancel() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("Batalkan proses") }
             }
         }
+
+        log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
