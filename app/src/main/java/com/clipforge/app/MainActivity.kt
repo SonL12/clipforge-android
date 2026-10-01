@@ -58,6 +58,7 @@ fun ConverterScreen() {
         categories = emptyList()
         category = null
         format = null
+        expanded = false
     }
 
     fun pilihKategori(cat: MediaType, daftar: List<PickedFile>) {
@@ -65,29 +66,38 @@ fun ConverterScreen() {
         format = Formats.targetFormats(cat, daftar.map { it.ext }.toSet()).firstOrNull()
     }
 
+    // Satu pintu untuk semua perubahan daftar file (pilih, hapus satu, hapus semua)
+    fun terapkan(picked: List<PickedFile>) {
+        files = picked
+        if (picked.isEmpty()) {
+            resetPilihan()
+            message = ""
+            return
+        }
+        val types = picked.map { Formats.typeOf(it.ext) }.toSet()
+        when {
+            null in types -> {
+                resetPilihan()
+                message = "⚠️ Ada file dengan format yang tidak didukung."
+            }
+            types.size > 1 -> {
+                resetPilihan()
+                message = "⚠️ Pilih satu jenis saja per proses (semua video, semua audio, atau semua gambar)."
+            }
+            else -> {
+                val jenis = types.first()!!
+                categories = Formats.categoriesFor(jenis)
+                pilihKategori(categories.first(), picked)
+                message = "📁 ${picked.size} file terdeteksi: ${jenis.label}"
+            }
+        }
+    }
+
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            val picked = uris.map { PickedFile(it, queryName(context, it)) }
-            files = picked
-            val types = picked.map { Formats.typeOf(it.ext) }.toSet()
-            when {
-                null in types -> {
-                    resetPilihan()
-                    message = "⚠️ Ada file dengan format yang tidak didukung."
-                }
-                types.size > 1 -> {
-                    resetPilihan()
-                    message = "⚠️ Pilih satu jenis saja per proses (semua video, semua audio, atau semua gambar)."
-                }
-                else -> {
-                    val jenis = types.first()!!
-                    categories = Formats.categoriesFor(jenis)
-                    pilihKategori(categories.first(), picked)
-                    message = "📁 ${picked.size} file terdeteksi: ${jenis.label}"
-                }
-            }
+            terapkan(uris.map { PickedFile(it, queryName(context, it)) })
         }
     }
 
@@ -101,13 +111,33 @@ fun ConverterScreen() {
         Text("ClipForge", style = MaterialTheme.typography.headlineMedium)
         Text("Converter", style = MaterialTheme.typography.titleMedium)
 
-        Button(onClick = {
-            picker.launch(arrayOf("video/*", "audio/*", "image/*"))
-        }) { Text("Pilih file") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                picker.launch(arrayOf("video/*", "audio/*", "image/*"))
+            }) { Text("Pilih file") }
+
+            if (files.isNotEmpty()) {
+                OutlinedButton(onClick = { terapkan(emptyList()) }) {
+                    Text("Batal / hapus semua")
+                }
+            }
+        }
 
         if (message.isNotEmpty()) Text(message)
-        files.take(5).forEach { Text("• ${it.name}", style = MaterialTheme.typography.bodySmall) }
-        if (files.size > 5) Text("… dan ${files.size - 5} file lain", style = MaterialTheme.typography.bodySmall)
+
+        files.forEach { f ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "• ${f.name}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { terapkan(files - f) }) { Text("✕") }
+            }
+        }
 
         if (categories.isNotEmpty()) {
             Text("Convert ke jenis", style = MaterialTheme.typography.labelLarge)
