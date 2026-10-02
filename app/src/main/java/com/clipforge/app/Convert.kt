@@ -1,6 +1,7 @@
 package com.clipforge.app
 
 import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -10,13 +11,14 @@ import java.io.IOException
 // Tebakan batas terowongan Cloudflare gratis, belum dicek. Ubah kalau ternyata beda.
 const val MAX_UPLOAD_MB = 100L
 
-// Mengembalikan lokasi file hasil. Melempar exception kalau gagal.
+class ConvertResult(val name: String, val label: String, val uri: Uri?, val mime: String)
+
 suspend fun convertFile(
     context: Context,
     f: PickedFile,
     fmt: String,
     update: (String) -> Unit
-): String {
+): ConvertResult {
     val base = ServerClient.normalizeUrl(Prefs.serverUrl(context))
     val key = Prefs.apiKey(context).trim()
     var jobId: String? = null
@@ -50,8 +52,8 @@ suspend fun convertFile(
                     "queued" -> update("⏳ ${f.name}: antre di server…")
                     "running" -> update("⚙️ ${f.name}: sedang diconvert…")
                     "error" -> throw Exception(s.error ?: "Gagal di server")
-                    "done" -> { namaHasil = s.filename; break }
                     "cancelled" -> throw Exception("Dibatalkan di server")
+                    "done" -> { namaHasil = s.filename; break }
                 }
             }
 
@@ -66,7 +68,7 @@ suspend fun convertFile(
                 target.abort()
                 throw e
             }
-            target.label
+            ConvertResult(outName, target.label, target.uri, target.mime)
         }
     } finally {
         val id = jobId

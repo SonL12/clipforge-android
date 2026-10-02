@@ -2,6 +2,7 @@ package com.clipforge.app
 
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -13,6 +14,8 @@ import java.io.OutputStream
 class SaveTarget(
     val stream: OutputStream,
     val label: String,
+    val uri: Uri?,
+    val mime: String,
     private val onFinish: () -> Unit,
     private val onAbort: () -> Unit
 ) {
@@ -25,6 +28,11 @@ object Storage {
     private fun safe(name: String) =
         name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "hasil" }
 
+    private fun mimeOf(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+    }
+
     fun openDownload(context: Context, rawName: String): SaveTarget {
         val name = safe(rawName)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) openMediaStore(context, name)
@@ -35,8 +43,7 @@ object Storage {
     @android.annotation.TargetApi(29)
     private fun openMediaStore(context: Context, name: String): SaveTarget {
         val resolver = context.contentResolver
-        val ext = name.substringAfterLast('.', "").lowercase()
-        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+        val mime = mimeOf(name)
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
             put(MediaStore.Downloads.MIME_TYPE, mime)
@@ -48,7 +55,7 @@ object Storage {
         val stream = resolver.openOutputStream(uri)
             ?: throw IOException("Gagal membuka file tujuan")
         return SaveTarget(
-            stream, "Download/ClipForge/$name",
+            stream, "Download/ClipForge/$name", uri, mime,
             onFinish = {
                 val v = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
                 resolver.update(uri, v, null, null)
@@ -57,7 +64,7 @@ object Storage {
         )
     }
 
-    // Android 9 ke bawah: folder app (tanpa izin), nanti bisa diganti
+    // Android 9 ke bawah: folder app (tanpa izin)
     private fun openLegacy(context: Context, name: String): SaveTarget {
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
         dir.mkdirs()
@@ -72,6 +79,7 @@ object Storage {
         val stream = file.outputStream()
         return SaveTarget(
             stream, "Android/data/${context.packageName}/files/Download/${file.name}",
+            null, mimeOf(name),
             onFinish = { }, onAbort = { file.delete() }
         )
     }

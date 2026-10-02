@@ -123,7 +123,6 @@ fun ConverterScreen() {
         log.clear()
         daftar.forEach { log.add("⏸️ ${it.name}: antre") }
 
-        // Service hanya dinyalakan kalau memang ada yang diproses
         val adaKerja = daftar.any { !samaFormat(it.ext, tujuan) }
         if (adaKerja && Build.VERSION.SDK_INT >= 33 &&
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -135,6 +134,8 @@ fun ConverterScreen() {
         convertJob = scope.launch {
             running = true
             if (adaKerja) runCatching { KeepAliveService.start(context) }
+            val berhasil = mutableListOf<ConvertResult>()
+            var gagal = 0
             try {
                 daftar.forEachIndexed { i, f ->
                     if (samaFormat(f.ext, tujuan)) {
@@ -142,14 +143,17 @@ fun ConverterScreen() {
                         return@forEachIndexed
                     }
                     try {
-                        val lokasi = convertFile(context, f, tujuan) { log[i] = it }
-                        log[i] = "✅ ${f.name} → $lokasi"
+                        val hasil = convertFile(context, f, tujuan) { log[i] = it }
+                        berhasil.add(hasil)
+                        log[i] = "✅ ${f.name} → ${hasil.label}"
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
+                        gagal++
                         log[i] = "❌ ${f.name}: ${e.message ?: e.javaClass.simpleName}"
                     }
                 }
+                if (adaKerja) Notifier.selesai(context, berhasil, gagal)
             } catch (e: CancellationException) {
                 for (i in log.indices) {
                     val t = log[i]
