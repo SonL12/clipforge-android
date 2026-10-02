@@ -36,6 +36,11 @@ object ServerClient {
     }
 
     private fun errorDetail(conn: HttpURLConnection): String {
+        val code = try { conn.responseCode } catch (e: Exception) { -1 }
+        if (code in listOf(502, 503, 504, 530)) {
+            return "Server Colab tidak aktif atau terowongan mati (kode $code). " +
+                "Jalankan ulang sel server di Colab, lalu tempel URL baru."
+        }
         val body = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
         val detail = try { JSONObject(body).opt("detail")?.toString() ?: body } catch (e: Exception) { body }
         return detail.take(300)
