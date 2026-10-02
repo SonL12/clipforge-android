@@ -51,6 +51,7 @@ suspend fun convertFile(
                     "running" -> update("⚙️ ${f.name}: sedang diconvert…")
                     "error" -> throw Exception(s.error ?: "Gagal di server")
                     "done" -> { namaHasil = s.filename; break }
+                    "cancelled" -> throw Exception("Dibatalkan di server")
                 }
             }
 

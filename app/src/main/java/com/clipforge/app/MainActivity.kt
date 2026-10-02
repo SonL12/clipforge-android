@@ -20,6 +20,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 
 data class PickedFile(val uri: Uri, val name: String) {
     val ext: String get() = name.substringAfterLast('.', "").lowercase()
@@ -66,6 +69,9 @@ fun ConverterScreen() {
     var running by remember { mutableStateOf(false) }
     var convertJob by remember { mutableStateOf<Job?>(null) }
     val log = remember { mutableStateListOf<String>() }
+    val notifPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
 
     fun resetPilihan() {
         categories = emptyList()
@@ -117,8 +123,18 @@ fun ConverterScreen() {
         log.clear()
         daftar.forEach { log.add("⏸️ ${it.name}: antre") }
 
+        // Service hanya dinyalakan kalau memang ada yang diproses
+        val adaKerja = daftar.any { !samaFormat(it.ext, tujuan) }
+        if (adaKerja && Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
         convertJob = scope.launch {
             running = true
+            if (adaKerja) runCatching { KeepAliveService.start(context) }
             try {
                 daftar.forEachIndexed { i, f ->
                     if (samaFormat(f.ext, tujuan)) {
@@ -147,6 +163,7 @@ fun ConverterScreen() {
             } finally {
                 running = false
                 convertJob = null
+                if (adaKerja) KeepAliveService.stop(context)
             }
         }
     }
