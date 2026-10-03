@@ -17,6 +17,8 @@ suspend fun convertFile(
     context: Context,
     f: PickedFile,
     fmt: String,
+    path: String = "/jobs",
+    extra: Map<String, String> = emptyMap(),
     update: (String) -> Unit
 ): ConvertResult {
     val base = ServerClient.normalizeUrl(Prefs.serverUrl(context))
@@ -31,7 +33,7 @@ suspend fun convertFile(
             }
 
             update("⬆️ ${f.name}: mengunggah 0%")
-            val id = ServerClient.createJob(context, base, key, f.uri, f.name, fmt) { pct ->
+            val id = ServerClient.createJob(context, base, key, f.uri, f.name, fmt, path, extra) { pct ->
                 update("⬆️ ${f.name}: mengunggah $pct%")
             }
             jobId = id

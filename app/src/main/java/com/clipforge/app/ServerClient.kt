@@ -87,19 +87,24 @@ object ServerClient {
     suspend fun createJob(
         context: Context, base: String, apiKey: String,
         uri: Uri, name: String, fmt: String,
+        path: String = "/jobs",
+        extra: Map<String, String> = emptyMap(),
         onProgress: (Int) -> Unit
     ): String {
         val boundary = "----ClipForge" + UUID.randomUUID().toString().replace("-", "")
         val safeName = name.replace("\"", "_").replace("\r", "").replace("\n", "")
-        val head = ("--$boundary\r\n" +
-            "Content-Disposition: form-data; name=\"fmt\"\r\n\r\n$fmt\r\n" +
-            "--$boundary\r\n" +
-            "Content-Disposition: form-data; name=\"file\"; filename=\"$safeName\"\r\n" +
-            "Content-Type: application/octet-stream\r\n\r\n").toByteArray(Charsets.UTF_8)
+        val sb = StringBuilder()
+        for ((k, v) in linkedMapOf("fmt" to fmt) + extra) {
+            sb.append("--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n")
+        }
+        sb.append("--$boundary\r\n")
+        sb.append("Content-Disposition: form-data; name=\"file\"; filename=\"$safeName\"\r\n")
+        sb.append("Content-Type: application/octet-stream\r\n\r\n")
+        val head = sb.toString().toByteArray(Charsets.UTF_8)
         val tail = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
         val size = fileSize(context, uri)
 
-        val conn = open("$base/jobs", apiKey, "POST", 120_000)
+        val conn = open("$base$path", apiKey, "POST", 120_000)
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         if (size > 0) conn.setFixedLengthStreamingMode(head.size + size + tail.size)

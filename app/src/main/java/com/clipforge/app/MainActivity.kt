@@ -28,7 +28,7 @@ data class PickedFile(val uri: Uri, val name: String) {
     val ext: String get() = name.substringAfterLast('.', "").lowercase()
 }
 
-private fun queryName(context: Context, uri: Uri): String {
+fun queryName(context: Context, uri: Uri): String {
     context.contentResolver.query(uri, null, null, null, null)?.use { c ->
         val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
         if (i >= 0 && c.moveToFirst()) return c.getString(i)
@@ -48,7 +48,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    ConverterScreen()
+                    AppScreen()
                 }
             }
         }
@@ -56,7 +56,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun ConverterScreen() {
+fun ConverterScreen(onBusy: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -67,6 +67,7 @@ fun ConverterScreen() {
     var message by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     var running by remember { mutableStateOf(false) }
+    LaunchedEffect(running) { onBusy(running) }
     var convertJob by remember { mutableStateOf<Job?>(null) }
     val log = remember { mutableStateListOf<String>() }
     val notifPermission = rememberLauncherForActivityResult(
@@ -275,5 +276,23 @@ fun ConverterScreen() {
         }
 
         log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+@Composable
+fun AppScreen() {
+    var tab by remember { mutableStateOf(0) }
+    var busy by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, enabled = !busy || tab == 0,
+                onClick = { tab = 0 }, text = { Text("Converter") })
+            Tab(selected = tab == 1, enabled = !busy || tab == 1,
+                onClick = { tab = 1 }, text = { Text("Subtitle") })
+        }
+        Box(Modifier.weight(1f)) {
+            if (tab == 0) ConverterScreen { busy = it } else SubtitleScreen { busy = it }
+        }
     }
 }
