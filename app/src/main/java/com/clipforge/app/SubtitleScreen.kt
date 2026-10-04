@@ -80,8 +80,8 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
         }
         val daftar = files
         val bahasa = language
-        val gaya = gaya
         val format = fmt
+        val gayaTeks = gaya
         log.clear()
         daftar.forEach { log.add("⏸️ ${it.name}: antre") }
 
