@@ -8,6 +8,7 @@ from fastapi.security import APIKeyHeader
 from core.config import WORK
 from core.ffmpeg_utils import jenis_file, set_cancel_event, Dibatalkan
 from tools.converter import convert_pintar
+from tools.subtitle import buat_subtitle, FORMAT_SUBTITLE
 
 API_KEY = os.environ.get("API_KEY")
 if not API_KEY:
@@ -22,10 +23,10 @@ def cek_key(key: str = Depends(key_header)):
 
 
 app = FastAPI(title="ClipForge Server")
-JOBS = {}                      # job_id -> info
+JOBS = {}
 JOBS_DIR = os.path.join(WORK, "jobs")
 os.makedirs(JOBS_DIR, exist_ok=True)
-ANTRIAN = threading.Semaphore(1)   # CPU Colab cuma 2 core: satu convert dalam satu waktu
+ANTRIAN = threading.Semaphore(1)   # satu pekerjaan berat dalam satu waktu
 
 
 def ekstensi(nama):
@@ -43,7 +44,11 @@ def kerjakan(job_id):
         job["status"] = "running"
         set_cancel_event(job["cancel"])
         try:
-            out = convert_pintar(job["input"], job["fmt"], job["out_dir"])
+            if job["kind"] == "subtitle":
+                out = buat_subtitle(job["input"], job["out_dir"], job["language"],
+                                    job["fmt"], job["cancel"], job.get("maxchars", 0))
+            else:
+                out = convert_pintar(job["input"], job["fmt"], job["out_dir"])
             job["output"] = out
             job["status"] = "done"
         except Dibatalkan:
@@ -53,6 +58,27 @@ def kerjakan(job_id):
             job["status"] = "error"
         finally:
             set_cancel_event(None)
+
+
+def simpan_dan_jalankan(file, kind, fmt, **extra):
+    nama = os.path.basename(file.filename or "file")
+    job_id = uuid.uuid4().hex[:12]
+    folder = os.path.join(JOBS_DIR, job_id)
+    in_dir = os.path.join(folder, "in")
+    out_dir = os.path.join(folder, "out")
+    os.makedirs(in_dir)
+    os.makedirs(out_dir)
+
+    in_path = os.path.join(in_dir, nama)
+    with open(in_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    JOBS[job_id] = {"kind": kind, "status": "queued", "input": in_path, "fmt": fmt,
+                    "out_dir": out_dir, "folder": folder,
+                    "output": None, "error": None,
+                    "cancel": threading.Event(), **extra}
+    threading.Thread(target=kerjakan, args=(job_id,), daemon=True).start()
+    return job_id
 
 
 @app.get("/health")
@@ -68,24 +94,21 @@ def buat_job(file: UploadFile = File(...), fmt: str = Form(...)):
         raise HTTPException(400, f"Format file tidak didukung: .{ekstensi(nama)}")
     if jenis_file(fmt) is None:
         raise HTTPException(400, f"Format tujuan tidak didukung: .{fmt}")
+    return {"job_id": simpan_dan_jalankan(file, "convert", fmt)}
 
-    job_id = uuid.uuid4().hex[:12]
-    folder = os.path.join(JOBS_DIR, job_id)
-    in_dir = os.path.join(folder, "in")
-    out_dir = os.path.join(folder, "out")
-    os.makedirs(in_dir)
-    os.makedirs(out_dir)
 
-    in_path = os.path.join(in_dir, nama)
-    with open(in_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    JOBS[job_id] = {"status": "queued", "input": in_path, "fmt": fmt,
-                    "out_dir": out_dir, "folder": folder,
-                    "output": None, "error": None,
-                    "cancel": threading.Event()}
-    threading.Thread(target=kerjakan, args=(job_id,), daemon=True).start()
-    return {"job_id": job_id}
+@app.post("/subtitle", dependencies=[Depends(cek_key)])
+def buat_subtitle_job(file: UploadFile = File(...), fmt: str = Form("srt"),
+                      language: str = Form("id"), maxchars: int = Form(0)):
+    fmt = fmt.lower().lstrip(".")
+    nama = os.path.basename(file.filename or "file")
+    if jenis_file(ekstensi(nama)) not in ("video", "audio"):
+        raise HTTPException(400, "Subtitle hanya untuk file video atau audio")
+    if fmt not in FORMAT_SUBTITLE:
+        raise HTTPException(400, f"Format subtitle tidak didukung: {fmt}")
+    maxchars = max(0, min(maxchars, 80))
+    return {"job_id": simpan_dan_jalankan(file, "subtitle", fmt,
+                                          language=language.lower(), maxchars=maxchars)}
 
 
 def ambil(job_id):
@@ -113,11 +136,11 @@ def unduh(job_id: str):
 @app.delete("/jobs/{job_id}", dependencies=[Depends(cek_key)])
 def hapus(job_id: str):
     job = ambil(job_id)
-    job["cancel"].set()          # hentikan ffmpeg kalau masih jalan
+    job["cancel"].set()
     del JOBS[job_id]
 
     def bersihkan():
-        for _ in range(50):      # tunggu proses berhenti (maks ~10 detik)
+        for _ in range(50):
             if job["status"] != "running":
                 break
             time.sleep(0.2)
