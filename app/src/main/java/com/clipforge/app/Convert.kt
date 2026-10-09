@@ -6,12 +6,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.OutputStream
 
 // Tebakan batas terowongan Cloudflare gratis, belum dicek. Ubah kalau ternyata beda.
 const val MAX_UPLOAD_MB = 100L
 
-class ConvertResult(val name: String, val label: String, val uri: Uri?, val mime: String)
+class ConvertResult(
+    val name: String,
+    val label: String,
+    val uri: Uri?,
+    val mime: String,
+    val text: String? = null
+)
+
+private class TeeOutputStream(private val a: OutputStream, private val b: OutputStream) : OutputStream() {
+    override fun write(x: Int) { a.write(x); b.write(x) }
+    override fun write(buf: ByteArray, off: Int, len: Int) { a.write(buf, off, len); b.write(buf, off, len) }
+    override fun flush() { a.flush() }
+}
 
 suspend fun convertFile(
     context: Context,
@@ -19,6 +33,7 @@ suspend fun convertFile(
     fmt: String,
     path: String = "/jobs",
     extra: Map<String, String> = emptyMap(),
+    keepText: Boolean = false,
     update: (String) -> Unit
 ): ConvertResult {
     val base = ServerClient.normalizeUrl(Prefs.serverUrl(context))
@@ -52,7 +67,7 @@ suspend fun convertFile(
                 }
                 when (s.status) {
                     "queued" -> update("⏳ ${f.name}: antre di server…")
-                    "running" -> update("⚙️ ${f.name}: sedang diconvert…")
+                    "running" -> update("⚙️ ${f.name}: sedang diproses…")
                     "error" -> throw Exception(s.error ?: "Gagal di server")
                     "cancelled" -> throw Exception("Dibatalkan di server")
                     "done" -> { namaHasil = s.filename; break }
@@ -61,8 +76,10 @@ suspend fun convertFile(
 
             val outName = namaHasil ?: "${f.name.substringBeforeLast('.')}.$fmt"
             val target = Storage.openDownload(context, outName)
+            val salinan = if (keepText) ByteArrayOutputStream() else null
             try {
-                ServerClient.download(base, key, id, target.stream) { bytes ->
+                val tujuan: OutputStream = if (salinan != null) TeeOutputStream(target.stream, salinan) else target.stream
+                ServerClient.download(base, key, id, tujuan) { bytes ->
                     update("⬇️ ${f.name}: mengunduh ${bytes / 1024} KB")
                 }
                 target.finish()
@@ -70,7 +87,8 @@ suspend fun convertFile(
                 target.abort()
                 throw e
             }
-            ConvertResult(outName, target.label, target.uri, target.mime)
+            ConvertResult(outName, target.label, target.uri, target.mime,
+                salinan?.toString(Charsets.UTF_8.name()))
         }
     } finally {
         val id = jobId

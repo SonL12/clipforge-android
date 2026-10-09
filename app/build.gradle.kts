@@ -20,8 +20,8 @@ android {
         applicationId = "com.clipforge.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.3"
+        versionCode = 9
+        versionName = "0.3.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
