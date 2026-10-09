@@ -43,37 +43,67 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
     val scope = rememberCoroutineScope()
 
     var files by remember { mutableStateOf(emptyList<PickedFile>()) }
+    var mode by remember { mutableStateOf("file") }          // "file" atau "audio"
     var language by remember { mutableStateOf("id") }
     var fmt by remember { mutableStateOf("srt") }
     var gaya by remember { mutableStateOf("28") }
-    var mode by remember { mutableStateOf("file") }        // "file" atau "video"
     var ukuran by remember { mutableStateOf("sedang") }
     var warna by remember { mutableStateOf("putih") }
-    var posisi by remember { mutableStateOf("bawah") }
+    var posisi by remember { mutableStateOf("tengah") }
+    var latar by remember { mutableStateOf("hitam") }
+    var rasio by remember { mutableStateOf("vertikal") }
     var message by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var job by remember { mutableStateOf<Job?>(null) }
     val log = remember { mutableStateListOf<String>() }
-    val cues = remember { mutableStateListOf<Cue>() }
 
     LaunchedEffect(running) { onBusy(running) }
 
     fun resetSemua() {
         files = emptyList()
-        cues.clear()
         log.clear()
         message = ""
     }
 
-    // Satu pintu untuk semua proses ke server
-    fun jalankan(
-        daftar: List<PickedFile>,
-        kirimFmt: String,
-        path: String,
-        extra: Map<String, String>,
-        keepText: Boolean,
-        onHasil: (ConvertResult) -> Unit = {}
-    ) {
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            val picked = uris.map { PickedFile(it, queryName(context, it)) }
+            val diizinkan = if (mode == "audio") listOf(MediaType.AUDIO)
+            else listOf(MediaType.VIDEO, MediaType.AUDIO)
+            val salah = picked.filter { Formats.typeOf(it.ext) !in diizinkan }
+            log.clear()
+            if (salah.isNotEmpty()) {
+                files = emptyList()
+                message = (if (mode == "audio") "⚠️ Mode ini hanya untuk file audio. Bukan: "
+                else "⚠️ Subtitle hanya untuk video atau audio. Bukan: ") +
+                    salah.joinToString { it.name }
+            } else {
+                files = picked
+                message = "📁 ${picked.size} file dipilih"
+            }
+        }
+    }
+
+    fun mulai() {
+        if (Prefs.serverUrl(context).isBlank() || Prefs.apiKey(context).isBlank()) {
+            message = "⚠️ Isi URL server dan API key dulu di bagian Server."
+            return
+        }
+        val daftar = files
+        val modeAudio = mode == "audio"
+        val path = if (modeAudio) "/audio-video" else "/subtitle"
+        val kirimFmt = if (modeAudio) "mp4" else fmt
+        val extra = mutableMapOf("language" to language, "maxchars" to gaya)
+        if (modeAudio) {
+            extra["ukuran"] = ukuran
+            extra["warna"] = warna
+            extra["posisi"] = posisi
+            extra["latar"] = latar
+            extra["rasio"] = rasio
+        }
+
         log.clear()
         daftar.forEach { log.add("⏸️ ${it.name}: antre") }
 
@@ -85,10 +115,9 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
             try {
                 daftar.forEachIndexed { i, f ->
                     try {
-                        val hasil = convertFile(context, f, kirimFmt, path, extra, keepText) { log[i] = it }
+                        val hasil = convertFile(context, f, kirimFmt, path, extra) { log[i] = it }
                         berhasil.add(hasil)
                         log[i] = "✅ ${f.name} → ${hasil.label}"
-                        onHasil(hasil)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -115,78 +144,6 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
         }
     }
 
-    fun serverSiap(): Boolean {
-        if (Prefs.serverUrl(context).isBlank() || Prefs.apiKey(context).isBlank()) {
-            message = "⚠️ Isi URL server dan API key dulu di bagian Server."
-            return false
-        }
-        return true
-    }
-
-    // Mode "file": buat file subtitle untuk semua file yang dipilih
-    fun buatFile() {
-        if (!serverSiap()) return
-        jalankan(
-            files, fmt, "/subtitle",
-            mapOf("language" to language, "maxchars" to gaya), false
-        )
-    }
-
-    // Mode "video", tahap 1: transkripsi, hasilnya masuk editor
-    fun buatUntukEdit() {
-        if (!serverSiap()) return
-        val f = files.firstOrNull() ?: return
-        cues.clear()
-        jalankan(
-            listOf(f), "srt", "/subtitle",
-            mapOf("language" to language, "maxchars" to gaya), true
-        ) { hasil ->
-            cues.addAll(parseSrt(hasil.text ?: ""))
-            message = if (cues.isEmpty()) "⚠️ Tidak ada teks yang terbaca." else
-                "✏️ ${cues.size} potongan. Perbaiki teks yang salah, lalu tempel ke video."
-        }
-    }
-
-    // Mode "video", tahap 2: tempel SRT hasil editan ke video
-    fun tempelKeVideo() {
-        if (!serverSiap()) return
-        val f = files.firstOrNull() ?: return
-        val srt = toSrt(cues)
-        if (srt.isBlank()) {
-            message = "⚠️ Semua teks kosong, tidak ada yang bisa ditempel."
-            return
-        }
-        jalankan(
-            listOf(f), "mp4", "/burn-srt",
-            mapOf("srt" to srt, "ukuran" to ukuran, "warna" to warna, "posisi" to posisi), false
-        )
-    }
-
-    val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            val picked = uris.map { PickedFile(it, queryName(context, it)) }
-            cues.clear()
-            log.clear()
-            val diizinkan = if (mode == "video") listOf(MediaType.VIDEO)
-            else listOf(MediaType.VIDEO, MediaType.AUDIO)
-            val salah = picked.filter { Formats.typeOf(it.ext) !in diizinkan }
-            if (salah.isNotEmpty()) {
-                files = emptyList()
-                message = if (mode == "video") "⚠️ Mode video hanya untuk file video. Bukan: "
-                else "⚠️ Subtitle hanya untuk video atau audio. Bukan: "
-                message += salah.joinToString { it.name }
-            } else if (mode == "video" && picked.size > 1) {
-                files = picked.take(1)
-                message = "📁 Mode video memproses satu video sekali, yang dipakai: ${picked[0].name}"
-            } else {
-                files = picked
-                message = "📁 ${picked.size} file dipilih"
-            }
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -207,7 +164,7 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
             "Hasil",
             listOf(
                 "file" to "File subtitle (.srt / .vtt / .txt)",
-                "video" to "Video dengan subtitle (bisa diedit dulu)"
+                "audio" to "Video dari audio (subtitle menempel)"
             ),
             mode, !running
         ) { mode = it; resetSemua() }
@@ -217,10 +174,10 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
                 enabled = !running,
                 onClick = {
                     picker.launch(
-                        if (mode == "video") arrayOf("video/*") else arrayOf("video/*", "audio/*")
+                        if (mode == "audio") arrayOf("audio/*") else arrayOf("video/*", "audio/*")
                     )
                 }
-            ) { Text(if (mode == "video") "Pilih video" else "Pilih video / audio") }
+            ) { Text(if (mode == "audio") "Pilih audio" else "Pilih video / audio") }
 
             if (files.isNotEmpty()) {
                 OutlinedButton(enabled = !running, onClick = { resetSemua() }) {
@@ -231,7 +188,7 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
 
         if (message.isNotEmpty()) Text(message)
 
-        if (log.isEmpty() && cues.isEmpty()) {
+        if (log.isEmpty()) {
             files.forEach { f ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -270,11 +227,37 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
                     listOf("srt" to "SRT", "vtt" to "VTT", "txt" to "Teks biasa (TXT)"),
                     fmt, !running
                 ) { fmt = it }
+            } else {
+                PilihanDropdown(
+                    "Format layar",
+                    listOf("vertikal" to "Vertikal 9:16 (TikTok)", "horizontal" to "Horizontal 16:9"),
+                    rasio, !running
+                ) { rasio = it }
+                PilihanDropdown(
+                    "Warna latar",
+                    listOf("hitam" to "Hitam", "biru" to "Biru tua", "ungu" to "Ungu tua"),
+                    latar, !running
+                ) { latar = it }
+                PilihanDropdown(
+                    "Ukuran teks",
+                    listOf("kecil" to "Kecil", "sedang" to "Sedang", "besar" to "Besar"),
+                    ukuran, !running
+                ) { ukuran = it }
+                PilihanDropdown(
+                    "Warna teks",
+                    listOf("putih" to "Putih", "kuning" to "Kuning"),
+                    warna, !running
+                ) { warna = it }
+                PilihanDropdown(
+                    "Posisi teks",
+                    listOf("tengah" to "Tengah", "bawah" to "Bawah"),
+                    posisi, !running
+                ) { posisi = it }
             }
 
             if (!running) {
-                Button(onClick = { if (mode == "video") buatUntukEdit() else buatFile() }) {
-                    Text(if (mode == "video") "1. Buat subtitle untuk diedit" else "Buat subtitle")
+                Button(onClick = { mulai() }) {
+                    Text(if (mode == "audio") "Buat video" else "Buat subtitle")
                 }
             } else {
                 Button(
@@ -283,54 +266,6 @@ fun SubtitleScreen(onBusy: (Boolean) -> Unit = {}) {
                         containerColor = MaterialTheme.colorScheme.error
                     )
                 ) { Text("Batalkan proses") }
-            }
-        }
-
-        // ---- Editor (mode video, setelah subtitle jadi) ----
-        if (mode == "video" && cues.isNotEmpty()) {
-            HorizontalDivider()
-            Text("2. Edit teks (${cues.size} potongan)", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "Waktu tidak bisa diubah di sini. Kosongkan teks atau tekan ✕ untuk membuang potongan.",
-                style = MaterialTheme.typography.bodySmall
-            )
-
-            cues.forEachIndexed { i, cue ->
-                Row(verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text(cue.time, style = MaterialTheme.typography.labelSmall)
-                        OutlinedTextField(
-                            value = cue.text,
-                            onValueChange = { cues[i] = cue.copy(text = it) },
-                            enabled = !running,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    TextButton(enabled = !running, onClick = { cues.removeAt(i) }) { Text("✕") }
-                }
-            }
-
-            HorizontalDivider()
-            Text("3. Tempel ke video", style = MaterialTheme.typography.titleSmall)
-
-            PilihanDropdown(
-                "Ukuran teks",
-                listOf("kecil" to "Kecil", "sedang" to "Sedang", "besar" to "Besar"),
-                ukuran, !running
-            ) { ukuran = it }
-            PilihanDropdown(
-                "Warna teks",
-                listOf("putih" to "Putih", "kuning" to "Kuning"),
-                warna, !running
-            ) { warna = it }
-            PilihanDropdown(
-                "Posisi",
-                listOf("bawah" to "Bawah (aman dari tombol TikTok)", "tengah" to "Tengah"),
-                posisi, !running
-            ) { posisi = it }
-
-            if (!running) {
-                Button(onClick = { tempelKeVideo() }) { Text("Tempel ke video") }
             }
         }
 
